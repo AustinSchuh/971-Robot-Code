@@ -24,12 +24,10 @@ class DriverStation;
     aos::InitGoogle(&argc, &argv);                                           \
     /* HAL_Initialize spawns several threads, including the CAN drivers.  */ \
     /* Go to realtime so that the child threads are RT.                   */ \
-    aos::SetCurrentThreadRealtimePriority(10);                               \
     if (!HAL_Initialize(500, 0)) {                                           \
       std::cerr << "FATAL ERROR: HAL could not be initialized" << std::endl; \
       return -1;                                                             \
     }                                                                        \
-    aos::UnsetCurrentThreadRealtimePriority();                               \
     HAL_Report(HALUsageReporting::kResourceType_Language,                    \
                HALUsageReporting::kLanguage_CPlusPlus);                      \
     static _ClassName_ robot;                                                \

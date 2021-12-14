@@ -317,3 +317,18 @@ cc_binary(
     )
     for num in range(1, 6)
 ]
+
+cc_binary(
+    name = "imu_printer",
+    srcs = [
+        "imu_printer.cc",
+    ],
+    target_compatible_with = ["//tools/platforms/hardware:roborio"],
+    deps = [
+        "//aos:init",
+        "//aos/events:shm_event_loop",
+        "//frc971/wpilib:ADIS16470",
+        "//frc971/wpilib:wpilib_robot_base",
+        "//third_party:wpilib",
+    ],
+)

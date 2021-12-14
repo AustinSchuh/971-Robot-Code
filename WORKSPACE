@@ -333,8 +333,8 @@ bind(
 http_archive(
     name = "allwpilib_ni_libraries",
     build_file = "@//debian:ni-libraries.BUILD",
-    sha256 = "f57dfc76ee3d8680aba8cfa6077e20cd47a2e5b2badd918ec3095d2c6300588f",
-    url = "https://www.frc971.org/Build-Dependencies/allwpilib_ni-libraries_987ab82a80232691d8e21c57c9f13d35d2c31f24.tar.gz",
+    sha256 = "644655b044addca0dfa4c12849f2bb6e52cf13bcc31818cc4129852d092738d5",
+    url = "https://www.frc971.org/Build-Dependencies/allwpilib_ni-libraries_8a557d22fda7b4092e5d185efd522a37e9bf8247.tar.gz",
 )
 
 # Downloaded from:

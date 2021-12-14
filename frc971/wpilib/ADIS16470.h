@@ -3,14 +3,11 @@
 
 #include "absl/types/span.h"
 
-#include "aos/events/event_loop.h"
 #include "frc971/wpilib/ahal/DigitalInput.h"
 #include "frc971/wpilib/ahal/DigitalOutput.h"
 #include "frc971/wpilib/ahal/DigitalSource.h"
 #include "frc971/wpilib/ahal/SPI.h"
 #include "frc971/wpilib/fpga_time_conversion.h"
-#include "frc971/wpilib/imu_batch_generated.h"
-#include "frc971/wpilib/imu_generated.h"
 
 namespace frc971 {
 namespace wpilib {
@@ -28,14 +25,19 @@ class ADIS16470 {
   // spi is how to talk to the sensor over SPI.
   // data_ready is the Data Ready (DR) pin (J6).
   // reset is the Reset (RST) pin (F3).
-  ADIS16470(aos::EventLoop *event_loop, frc::SPI *spi,
+  ADIS16470(/*aos::EventLoop *event_loop, */frc::SPI *spi,
             frc::DigitalInput *data_ready, frc::DigitalOutput *reset);
 
   ADIS16470(const ADIS16470 &) = delete;
   ADIS16470 &operator=(const ADIS16470 &) = delete;
 
   // Reads all the queued-up data and sends out any complete readings.
-  void DoReads();
+  //void DoReads();
+  //
+  void Run() {
+    BeginInitialization();
+    CHECK(state_ == State::kWaitForReset);
+  }
 
  private:
   enum class State {
@@ -48,8 +50,8 @@ class ADIS16470 {
   void DoInitializeStep();
 
   // Processes a complete reading in read_data_.
-  flatbuffers::Offset<IMUValues> ProcessReading(
-      flatbuffers::FlatBufferBuilder *fbb);
+  //flatbuffers::Offset<IMUValues> ProcessReading(
+      //flatbuffers::FlatBufferBuilder *fbb);
 
   // Converts a 32-bit value at data to a scaled output value where a value of 1
   // corresponds to lsb_per_output.
@@ -58,10 +60,15 @@ class ADIS16470 {
   static double ConvertValue16(absl::Span<const uint32_t> data,
                                double lsb_per_output);
 
-  static flatbuffers::Offset<ADIS16470DiagStat> PackDiagStat(
+  /*static flatbuffers::Offset<ADIS16470DiagStat> PackDiagStat(
       flatbuffers::FlatBufferBuilder *fbb, uint16_t value);
+      */
 
+  static bool DiagStatHasError(uint16_t value);
+
+  /*
   static bool DiagStatHasError(const ADIS16470DiagStat &diag_stat);
+  */
 
   // These may only be called during configuration, when spi_ is not in
   // automatic mode.
@@ -71,13 +78,15 @@ class ADIS16470 {
 
   void BeginInitialization() {
     state_ = State::kUninitialized;
-    initialize_timer_->Setup(event_loop_->monotonic_now() +
-                             std::chrono::milliseconds(25));
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    DoInitializeStep();
+    //initialize_timer_->Setup(event_loop_->monotonic_now() +
+                             //std::chrono::milliseconds(25));
   }
 
-  aos::EventLoop *const event_loop_;
-  aos::Sender<::frc971::IMUValuesBatch> imu_values_sender_;
-  aos::TimerHandler *const initialize_timer_;
+  //aos::EventLoop *const event_loop_;
+  //aos::Sender<::frc971::IMUValuesBatch> imu_values_sender_;
+  //aos::TimerHandler *const initialize_timer_;
 
   frc::SPI *const spi_;
   frc::DigitalInput *const data_ready_;

@@ -6,6 +6,7 @@
 #include "aos/time/time.h"
 #include "glog/logging.h"
 #include "hal/HAL.h"
+#include "math.h"
 
 namespace frc971 {
 namespace wpilib {
@@ -187,16 +188,9 @@ constexpr uint16_t kObservedProductId = 0x4256;
 
 }  // namespace
 
-ADIS16470::ADIS16470(aos::EventLoop *event_loop, frc::SPI *spi,
-                     frc::DigitalInput *data_ready, frc::DigitalOutput *reset)
-    : event_loop_(event_loop),
-      imu_values_sender_(
-          event_loop_->MakeSender<::frc971::IMUValuesBatch>("/drivetrain")),
-      initialize_timer_(
-          event_loop_->AddTimer([this]() { DoInitializeStep(); })),
-      spi_(spi),
-      data_ready_(data_ready),
-      reset_(reset) {
+ADIS16470::ADIS16470(frc::SPI *spi, frc::DigitalInput *data_ready,
+                     frc::DigitalOutput *reset)
+    : spi_(spi), data_ready_(data_ready), reset_(reset) {
   // Rather than put the entire data packet into the header, just put a size
   // there and verify it matches here.
   CHECK_EQ(kAutospiDataSize, read_data_.size());
@@ -216,54 +210,6 @@ ADIS16470::ADIS16470(aos::EventLoop *event_loop, frc::SPI *spi,
   PCHECK(system("busybox ps -ef | grep '\\[spi1\\]' | awk '{print $1}' | xargs "
                 "chrt -f -p "
                 "33") == 0);
-
-  event_loop_->OnRun([this]() { BeginInitialization(); });
-}
-
-void ADIS16470::DoReads() {
-  if (state_ != State::kRunning) {
-    // Not sure how to interpret data received now, so ignore it.
-    return;
-  }
-
-  auto builder = imu_values_sender_.MakeBuilder();
-
-  int amount_to_read =
-      spi_->ReadAutoReceivedData(to_read_.data(), 0, 0 /* don't block */);
-
-  aos::SizedArray<flatbuffers::Offset<IMUValues>, 50> readings_offsets;
-  while (true) {
-    if (amount_to_read == 0) break;
-    CHECK(!to_read_.empty());
-    const int amount_read_now = std::min<int>(amount_to_read, to_read_.size());
-    CHECK_GT(amount_read_now, 0) << "amount_to_read: " << amount_to_read
-                                 << ", to_read_.size(): " << to_read_.size();
-    spi_->ReadAutoReceivedData(to_read_.data(), amount_read_now,
-                               0 /* don't block */);
-    to_read_ = to_read_.subspan(amount_read_now);
-    amount_to_read -= amount_read_now;
-
-    if (to_read_.empty()) {
-      flatbuffers::Offset<IMUValues> reading_offset =
-          ProcessReading(builder.fbb());
-      readings_offsets.push_back(reading_offset);
-
-      // Reset for the next reading.
-      to_read_ = absl::MakeSpan(read_data_);
-    } else {
-      CHECK_EQ(amount_to_read, 0);
-      break;
-    }
-  }
-
-  flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<IMUValues>>>
-      readings_offset = builder.fbb()->CreateVector(readings_offsets.data(),
-                                                    readings_offsets.size());
-
-  IMUValuesBatch::Builder imu_values_batch_builder =
-      builder.MakeBuilder<IMUValuesBatch>();
-  imu_values_batch_builder.add_readings(readings_offset);
-  builder.CheckOk(builder.Send(imu_values_batch_builder.Finish()));
 }
 
 void ADIS16470::DoInitializeStep() {
@@ -284,25 +230,27 @@ void ADIS16470::DoInitializeStep() {
       state_ = State::kWaitForReset;
       // Datasheet says it takes 193 ms to come out of reset, so give it some
       // margin on top of that.
-      initialize_timer_->Setup(event_loop_->monotonic_now() +
-                               chrono::milliseconds(250));
+      //initialize_timer_->Setup(event_loop_->monotonic_now() +
+      std::this_thread::sleep_for(chrono::milliseconds(250));
+      DoInitializeStep();
     } break;
 
     case State::kWaitForReset: {
-      flatbuffers::Offset<ADIS16470DiagStat> start_diag_stat;
-      flatbuffers::Offset<ADIS16470DiagStat> self_test_diag_stat;
+      //flatbuffers::Offset<ADIS16470DiagStat> start_diag_stat;
+      //flatbuffers::Offset<ADIS16470DiagStat> self_test_diag_stat;
       bool success = false;
-      auto builder = imu_values_sender_.MakeBuilder();
+      //auto builder = imu_values_sender_.MakeBuilder();
 
       // Configure the IMU the way we want it.
       const uint16_t product_id = ReadRegister(registers::PROD_ID, 0);
+      LOG(INFO) << "Product ID of " << product_id;
       if (product_id == kExpectedProductId ||
           product_id == kObservedProductId) {
         const uint16_t start_diag_stat_value =
             ReadRegister(registers::DIAG_STAT, 0);
-        start_diag_stat = PackDiagStat(builder.fbb(), start_diag_stat_value);
-        if (!DiagStatHasError(
-                *GetTemporaryPointer(*builder.fbb(), start_diag_stat))) {
+        //start_diag_stat = PackDiagStat(builder.fbb(), start_diag_stat_value);
+        if (!DiagStatHasError(start_diag_stat_value)) {
+                //*GetTemporaryPointer(*builder.fbb(), start_diag_stat))) {
           WriteRegister(registers::FILT_CTRL, 0 /* no filtering */);
           WriteRegister(
               registers::MSC_CTRL,
@@ -323,10 +271,9 @@ void ADIS16470::DoInitializeStep() {
           // autospi data packet.
           const uint16_t self_test_diag_stat_value =
               ReadRegister(registers::DIAG_STAT, kAutospiPacket[0]);
-          self_test_diag_stat =
-              PackDiagStat(builder.fbb(), self_test_diag_stat_value);
-          if (!DiagStatHasError(
-                  *GetTemporaryPointer(*builder.fbb(), self_test_diag_stat))) {
+          //self_test_diag_stat =
+              //PackDiagStat(builder.fbb(), self_test_diag_stat_value);
+          if (!DiagStatHasError(self_test_diag_stat_value)) {
             // Initialize automatic mode, but don't start it yet.
             spi_->InitAuto(kAutospiDataSize * 100);
             spi_->SetAutoTransmitData(kAutospiPacket,
@@ -340,13 +287,18 @@ void ADIS16470::DoInitializeStep() {
                 1 /* toggle CS every 2 8-bit bytes */);
 
             // Read any data queued up by the FPGA.
+            LOG(INFO) << "Clearing buffer";
             while (true) {
               uint32_t buffer;
+              LOG(INFO) << "Going to read";
               if (spi_->ReadAutoReceivedData(&buffer, 1, 0 /* don't block */) ==
                   0) {
+                LOG(INFO) << "Done reading";
                 break;
               }
+              LOG(INFO) << "Done reading";
             }
+            LOG(INFO) << "Done clearing buffer.";
 
             // Finally, enable automatic mode so it starts reading data.
             spi_->StartAutoTrigger(*data_ready_, true, false);
@@ -359,36 +311,19 @@ void ADIS16470::DoInitializeStep() {
             // Throw out the first sample.  It is almost always faulted due to
             // how we start up, and it isn't worth tracking for downstream users
             // to look at.
+            LOG(INFO) << "Going to read the first sample";
             to_read_ = absl::MakeSpan(read_data_);
             CHECK_EQ(spi_->ReadAutoReceivedData(
                          to_read_.data(), to_read_.size(),
                          1000.0 /* block for up to 1 second */),
                      static_cast<int>(to_read_.size()))
                 << ": Failed to read first sample.";
+            LOG(INFO) << "Done reading first sample";
             success = true;
           }
         }
       }
 
-      IMUValues::Builder imu_builder = builder.MakeBuilder<IMUValues>();
-      imu_builder.add_product_id(product_id);
-      if (!start_diag_stat.IsNull()) {
-        imu_builder.add_start_diag_stat(start_diag_stat);
-      }
-      if (!self_test_diag_stat.IsNull()) {
-        imu_builder.add_self_test_diag_stat(self_test_diag_stat);
-      }
-
-      const flatbuffers::Offset<IMUValues> readings_offsets =
-          imu_builder.Finish();
-      const flatbuffers::Offset<
-          flatbuffers::Vector<flatbuffers::Offset<IMUValues>>>
-          readings_offset = builder.fbb()->CreateVector(&readings_offsets, 1);
-
-      IMUValuesBatch::Builder imu_batch_builder =
-          builder.MakeBuilder<IMUValuesBatch>();
-      imu_batch_builder.add_readings(readings_offset);
-      builder.CheckOk(builder.Send(imu_batch_builder.Finish()));
       if (success) {
         state_ = State::kRunning;
       } else {
@@ -399,60 +334,6 @@ void ADIS16470::DoInitializeStep() {
     case State::kRunning:
       LOG(FATAL) << "Not a reset state";
   }
-}
-
-flatbuffers::Offset<IMUValues> ADIS16470::ProcessReading(
-    flatbuffers::FlatBufferBuilder *fbb) {
-  // If we ever see this, we'll need to decide how to handle it. Probably reset
-  // everything and try again.
-  CHECK_EQ(0, spi_->GetAutoDroppedCount());
-
-  absl::Span<const uint32_t> to_process = read_data_;
-  hal::fpga_clock::time_point fpga_time;
-  {
-    int32_t status = 0;
-    const uint64_t fpga_expanded = HAL_ExpandFPGATime(to_process[0], &status);
-    CHECK_EQ(0, status);
-    fpga_time =
-        hal::fpga_clock::time_point(hal::fpga_clock::duration(fpga_expanded));
-  }
-  to_process = to_process.subspan(1);
-
-  const uint16_t diag_stat_value = (static_cast<uint16_t>(to_process[0]) << 8) |
-                                   static_cast<uint16_t>(to_process[1]);
-  const auto diag_stat = PackDiagStat(fbb, diag_stat_value);
-  to_process = to_process.subspan(2);
-
-  IMUValues::Builder imu_builder(*fbb);
-  imu_builder.add_fpga_timestamp(
-      aos::time::DurationInSeconds(fpga_time.time_since_epoch()));
-  imu_builder.add_monotonic_timestamp_ns(
-      time_converter_.FpgaToMonotonic(fpga_time).time_since_epoch().count());
-  imu_builder.add_previous_reading_diag_stat(diag_stat);
-
-  imu_builder.add_gyro_x(ConvertValue16(to_process, kGyroLsbRadianSecond));
-  to_process = to_process.subspan(2);
-  imu_builder.add_accelerometer_x(
-      ConvertValue32(to_process, kAccelerometerLsbG));
-  to_process = to_process.subspan(4);
-  imu_builder.add_gyro_y(ConvertValue16(to_process, kGyroLsbRadianSecond));
-  to_process = to_process.subspan(2);
-  imu_builder.add_accelerometer_y(
-      ConvertValue32(to_process, kAccelerometerLsbG));
-  to_process = to_process.subspan(4);
-  imu_builder.add_gyro_z(ConvertValue16(to_process, kGyroLsbRadianSecond));
-  to_process = to_process.subspan(2);
-  imu_builder.add_accelerometer_z(
-      ConvertValue32(to_process, kAccelerometerLsbG));
-  to_process = to_process.subspan(4);
-
-  imu_builder.add_temperature(
-      ConvertValue16(to_process, kTemperatureLsbDegree));
-  to_process = to_process.subspan(2);
-
-  CHECK(to_process.empty()) << "Have leftover bytes: " << to_process.size();
-
-  return imu_builder.Finish();
 }
 
 double ADIS16470::ConvertValue32(absl::Span<const uint32_t> data,
@@ -475,24 +356,10 @@ double ADIS16470::ConvertValue16(absl::Span<const uint32_t> data,
   return static_cast<double>(signed_value) * lsb_per_output;
 }
 
-flatbuffers::Offset<ADIS16470DiagStat> ADIS16470::PackDiagStat(
-    flatbuffers::FlatBufferBuilder *fbb, uint16_t value) {
-  ADIS16470DiagStat::Builder diag_stat_builder(*fbb);
-  diag_stat_builder.add_clock_error(value & (1 << 7));
-  diag_stat_builder.add_memory_failure(value & (1 << 6));
-  diag_stat_builder.add_sensor_failure(value & (1 << 5));
-  diag_stat_builder.add_standby_mode(value & (1 << 4));
-  diag_stat_builder.add_spi_communication_error(value & (1 << 3));
-  diag_stat_builder.add_flash_memory_update_error(value & (1 << 2));
-  diag_stat_builder.add_data_path_overrun(value & (1 << 1));
-  return diag_stat_builder.Finish();
-}
-
-bool ADIS16470::DiagStatHasError(const ADIS16470DiagStat &diag_stat) {
-  return diag_stat.clock_error() || diag_stat.memory_failure() ||
-         diag_stat.sensor_failure() || diag_stat.standby_mode() ||
-         diag_stat.spi_communication_error() ||
-         diag_stat.flash_memory_update_error() || diag_stat.data_path_overrun();
+bool ADIS16470::DiagStatHasError(uint16_t value) {
+  return (value & (1 << 7)) || (value & (1 << 6)) || (value & (1 << 5)) ||
+         (value & (1 << 4)) || (value & (1 << 3)) || (value & (1 << 2)) ||
+         (value & (1 << 1));
 }
 
 uint16_t ADIS16470::ReadRegister(uint8_t register_address,
